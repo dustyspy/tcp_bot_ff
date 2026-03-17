@@ -5,19 +5,11 @@
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import subprocess
-import threading
-import time
-import os
-import sys
-import signal
+import subprocess, threading, time, os, sys, signal
 
 app = Flask(__name__)
 CORS(app)
 
-# ===============================
-# CONFIG 🔐
-# ===============================
 API_KEY = "MAINUL_X_SECURE"
 
 # ===============================
@@ -27,42 +19,44 @@ bot_process = None
 bot_status = "STOPPED"
 bot_start_time = None
 console_lines = []
-target_uid = None
+
+# 🔥 NEW ACCOUNT SYSTEM
+user_uid = None
+user_pass = None
 
 
 # ===============================
-# SECURITY CHECK
+# SECURITY
 # ===============================
 def check_key(req):
     return req.headers.get("x-api-key") == API_KEY
 
 
 # ===============================
-# CONSOLE SYSTEM
+# CONSOLE
 # ===============================
 def add_console_line(text):
-    global console_lines
     timestamp = time.strftime("%H:%M:%S")
-    line = {"timestamp": timestamp, "text": text}
-    console_lines.append(line)
+    console_lines.append({"timestamp": timestamp, "text": text})
 
     if len(console_lines) > 100:
-        console_lines = console_lines[-100:]
+        console_lines.pop(0)
 
     print(f"[{timestamp}] {text}")
 
 
 # ===============================
-# BOT RUN FUNCTION (FIXED)
+# BOT RUN
 # ===============================
 def run_bot():
-    global bot_process, bot_status, bot_start_time
+    global bot_process, bot_status
+
+    if not user_uid or not user_pass:
+        add_console_line("❌ No account set")
+        return
 
     try:
-        cmd = [sys.executable, "main.py"]
-
-        if target_uid:
-            cmd.append(str(target_uid))
+        cmd = [sys.executable, "main.py", user_uid, user_pass]
 
         bot_process = subprocess.Popen(
             cmd,
@@ -72,9 +66,8 @@ def run_bot():
             bufsize=1
         )
 
-        add_console_line("🟢 Bot started")
+        add_console_line(f"🟢 Bot started on UID: {user_uid}")
 
-        # 🔥 NON-BLOCKING OUTPUT READ
         while True:
             line = bot_process.stdout.readline()
             if not line:
@@ -89,7 +82,6 @@ def run_bot():
 
     finally:
         bot_status = "STOPPED"
-        bot_start_time = None
         add_console_line("🔴 Bot stopped")
 
 
@@ -99,40 +91,56 @@ def run_bot():
 
 @app.route("/")
 def home():
-    return jsonify({
-        "name": "MAINUL TCP CONTROLLER",
-        "status": "RUNNING"
-    })
+    return jsonify({"status": "RUNNING"})
 
 
 @app.route("/api/status")
 def status():
     uptime = "0s"
-
     if bot_start_time and bot_status == "RUNNING":
-        elapsed = int(time.time() - bot_start_time)
-        uptime = f"{elapsed}s"
+        uptime = f"{int(time.time() - bot_start_time)}s"
 
     return jsonify({
         "status": bot_status,
-        "uptime": uptime,
-        "uid": target_uid
+        "uid": user_uid,
+        "uptime": uptime
     })
 
 
-@app.route("/api/start", methods=["POST"])
-def start():
-    global bot_status, bot_start_time, target_uid
+# 🔥 SAVE ACCOUNT
+@app.route("/api/set_account", methods=["POST"])
+def set_account():
+    global user_uid, user_pass
 
     if not check_key(request):
-        return jsonify({"success": False, "msg": "Unauthorized"})
+        return jsonify({"success": False})
+
+    data = request.json
+
+    user_uid = data.get("uid")
+    user_pass = data.get("password")
+
+    if not user_uid or not user_pass:
+        return jsonify({"success": False, "msg": "Missing data"})
+
+    add_console_line(f"💾 Account saved: {user_uid}")
+
+    return jsonify({"success": True})
+
+
+# 🚀 START
+@app.route("/api/start", methods=["POST"])
+def start():
+    global bot_status, bot_start_time
+
+    if not check_key(request):
+        return jsonify({"success": False})
 
     if bot_status == "RUNNING":
         return jsonify({"success": False, "msg": "Already running"})
 
-    data = request.json
-    if data and "uid" in data:
-        target_uid = data["uid"]
+    if not user_uid or not user_pass:
+        return jsonify({"success": False, "msg": "No account set"})
 
     thread = threading.Thread(target=run_bot, daemon=True)
     thread.start()
@@ -145,12 +153,13 @@ def start():
     return jsonify({"success": True})
 
 
+# 🛑 STOP
 @app.route("/api/stop", methods=["POST"])
 def stop():
-    global bot_status, bot_start_time, bot_process
+    global bot_process, bot_status
 
     if not check_key(request):
-        return jsonify({"success": False, "msg": "Unauthorized"})
+        return jsonify({"success": False})
 
     if bot_process:
         try:
@@ -159,43 +168,25 @@ def stop():
             pass
 
     bot_status = "STOPPED"
-    bot_start_time = None
-
-    add_console_line("🔴 Bot stopped")
+    add_console_line("🛑 Bot stopped")
 
     return jsonify({"success": True})
 
 
+# 🔄 RESTART
 @app.route("/api/restart", methods=["POST"])
 def restart():
-    global bot_process, bot_status, bot_start_time
-
-    if not check_key(request):
-        return jsonify({"success": False, "msg": "Unauthorized"})
-
-    if bot_process:
-        try:
-            os.killpg(os.getpgid(bot_process.pid), signal.SIGTERM)
-        except:
-            pass
-
-    thread = threading.Thread(target=run_bot, daemon=True)
-    thread.start()
-
-    bot_status = "RUNNING"
-    bot_start_time = time.time()
-
-    add_console_line("🔄 Bot restarted")
-
-    return jsonify({"success": True})
+    stop()
+    return start()
 
 
+# 💀 FORCE KILL
 @app.route("/api/forcekill", methods=["POST"])
 def forcekill():
-    global bot_process, bot_status, bot_start_time
+    global bot_process, bot_status
 
     if not check_key(request):
-        return jsonify({"success": False, "msg": "Unauthorized"})
+        return jsonify({"success": False})
 
     if bot_process:
         try:
@@ -204,32 +195,18 @@ def forcekill():
             pass
 
     bot_status = "STOPPED"
-    bot_start_time = None
-
-    add_console_line("💀 Bot force killed")
+    add_console_line("💀 Force killed")
 
     return jsonify({"success": True})
 
 
-@app.route("/api/set_uid", methods=["POST"])
-def set_uid():
-    global target_uid
-
-    data = request.json
-
-    if data and "uid" in data:
-        target_uid = data["uid"]
-        add_console_line(f"🎯 UID set: {target_uid}")
-        return jsonify({"success": True})
-
-    return jsonify({"success": False})
-
-
+# 📊 CONSOLE
 @app.route("/api/console")
 def console():
     return jsonify({"console": console_lines})
 
 
+# 🧹 CLEAR
 @app.route("/api/clear", methods=["POST"])
 def clear():
     global console_lines
@@ -239,8 +216,8 @@ def clear():
 
 
 # ===============================
-# RUN SERVER
+# RUN
 # ===============================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=port, threaded=True)
