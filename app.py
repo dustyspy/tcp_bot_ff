@@ -5,7 +5,7 @@
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import subprocess, threading, time, os, sys, signal
+import subprocess, threading, time, os, sys
 
 app = Flask(__name__)
 CORS(app)
@@ -36,6 +36,7 @@ def check_key(req):
 # ===============================
 def add_console_line(text):
     global console_lines
+
     timestamp = time.strftime("%H:%M:%S")
 
     console_lines.append({
@@ -50,7 +51,7 @@ def add_console_line(text):
 
 
 # ===============================
-# BOT RUN
+# BOT RUN (🔥 FIXED)
 # ===============================
 def run_bot():
     global bot_process, bot_status
@@ -70,13 +71,29 @@ def run_bot():
             text=True
         )
 
+        if bot_process is None:
+            add_console_line("❌ Failed to start bot")
+            bot_status = "STOPPED"
+            return
+
         add_console_line(f"🟢 Bot started on UID: {user_uid}")
 
-        for line in iter(bot_process.stdout.readline, ''):
-            if line.strip():
-                add_console_line(line.strip())
+        # 🔥 LIVE OUTPUT READ
+        while True:
+            line = bot_process.stdout.readline()
 
-        bot_process.wait()
+            if not line and bot_process.poll() is not None:
+                break
+
+            if line:
+                clean = line.replace("\x1b[H", "").replace("\x1b[2J", "").replace("\x1b[3J", "")
+                clean = clean.strip()
+
+                if clean:
+                    add_console_line(clean)
+
+        if bot_process:
+            bot_process.wait()
 
     except Exception as e:
         add_console_line(f"❌ Error: {e}")
@@ -130,7 +147,6 @@ def set_account():
     if not user_uid or not user_pass:
         return jsonify({"success": False, "msg": "Missing UID or Password"})
 
-    # 🔥 SAVE FILE (optional but useful)
     try:
         with open("MAINUL9X.txt", "w") as f:
             f.write(f"uid={user_uid},password={user_pass}")
@@ -143,17 +159,20 @@ def set_account():
 
 
 # ===============================
-# START
+# START (🔥 SAFE)
 # ===============================
 @app.route("/api/start", methods=["POST"])
 def start():
-    global bot_status, bot_start_time
+    global bot_status, bot_start_time, bot_process
 
     if not check_key(request):
         return jsonify({"success": False, "msg": "Unauthorized"})
 
     if bot_status == "RUNNING":
         return jsonify({"success": False, "msg": "Already running"})
+
+    if bot_process is not None:
+        return jsonify({"success": False, "msg": "Process already exists"})
 
     if not user_uid or not user_pass:
         return jsonify({"success": False, "msg": "No account set"})
@@ -170,7 +189,7 @@ def start():
 
 
 # ===============================
-# STOP
+# STOP (🔥 SAFE)
 # ===============================
 @app.route("/api/stop", methods=["POST"])
 def stop():
@@ -180,7 +199,7 @@ def stop():
         return jsonify({"success": False, "msg": "Unauthorized"})
 
     try:
-        if bot_process:
+        if bot_process is not None:
             bot_process.terminate()
             bot_process = None
     except:
@@ -198,6 +217,7 @@ def stop():
 @app.route("/api/restart", methods=["POST"])
 def restart():
     stop()
+    time.sleep(1)
     return start()
 
 
@@ -212,7 +232,7 @@ def forcekill():
         return jsonify({"success": False, "msg": "Unauthorized"})
 
     try:
-        if bot_process:
+        if bot_process is not None:
             bot_process.kill()
             bot_process = None
     except:
