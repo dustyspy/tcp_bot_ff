@@ -39,19 +39,23 @@ def add_console_line(text):
 
     timestamp = time.strftime("%H:%M:%S")
 
-    console_lines.append({
+    line = {
         "timestamp": timestamp,
         "text": str(text)
-    })
+    }
 
+    console_lines.append(line)
+
+    # keep last 100 logs
     if len(console_lines) > 100:
         console_lines = console_lines[-100:]
 
-    print(f"[{timestamp}] {text}")
+    # 🔥 render log
+    print(f"[{timestamp}] {text}", flush=True)
 
 
 # ===============================
-# BOT RUN (🔥 FIXED)
+# BOT RUN (🔥 FULL FIXED)
 # ===============================
 def run_bot():
     global bot_process, bot_status
@@ -62,44 +66,37 @@ def run_bot():
         return
 
     try:
-        cmd = [sys.executable, "main.py", user_uid, user_pass]
+        # 🔥 FIXED PATH + UNBUFFERED
+        cmd = [sys.executable, "-u", "tcp_bot_ff/main.py", user_uid, user_pass]
+
+        add_console_line(f"⚙️ Running: {' '.join(cmd)}")
 
         bot_process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            bufsize=1,
             text=True
         )
 
-        if bot_process is None:
-            add_console_line("❌ Failed to start bot")
-            bot_status = "STOPPED"
-            return
-
         add_console_line(f"🟢 Bot started on UID: {user_uid}")
 
-        # 🔥 LIVE OUTPUT READ
-        while True:
-            line = bot_process.stdout.readline()
+        # 🔥 REALTIME OUTPUT
+        for line in bot_process.stdout:
+            clean = line.replace("\x1b[H", "").replace("\x1b[2J", "").replace("\x1b[3J", "")
+            clean = clean.strip()
 
-            if not line and bot_process.poll() is not None:
-                break
+            if clean:
+                add_console_line(clean)
 
-            if line:
-                clean = line.replace("\x1b[H", "").replace("\x1b[2J", "").replace("\x1b[3J", "")
-                clean = clean.strip()
-
-                if clean:
-                    add_console_line(clean)
-
-        if bot_process:
-            bot_process.wait()
+        bot_process.wait()
 
     except Exception as e:
         add_console_line(f"❌ Error: {e}")
 
     finally:
         bot_status = "STOPPED"
+        bot_process = None
         add_console_line("🔴 Bot stopped")
 
 
@@ -159,20 +156,17 @@ def set_account():
 
 
 # ===============================
-# START (🔥 SAFE)
+# START
 # ===============================
 @app.route("/api/start", methods=["POST"])
 def start():
-    global bot_status, bot_start_time, bot_process
+    global bot_status, bot_start_time
 
     if not check_key(request):
         return jsonify({"success": False, "msg": "Unauthorized"})
 
     if bot_status == "RUNNING":
         return jsonify({"success": False, "msg": "Already running"})
-
-    if bot_process is not None:
-        return jsonify({"success": False, "msg": "Process already exists"})
 
     if not user_uid or not user_pass:
         return jsonify({"success": False, "msg": "No account set"})
@@ -189,7 +183,7 @@ def start():
 
 
 # ===============================
-# STOP (🔥 SAFE)
+# STOP
 # ===============================
 @app.route("/api/stop", methods=["POST"])
 def stop():
@@ -199,7 +193,7 @@ def stop():
         return jsonify({"success": False, "msg": "Unauthorized"})
 
     try:
-        if bot_process is not None:
+        if bot_process:
             bot_process.terminate()
             bot_process = None
     except:
@@ -232,7 +226,7 @@ def forcekill():
         return jsonify({"success": False, "msg": "Unauthorized"})
 
     try:
-        if bot_process is not None:
+        if bot_process:
             bot_process.kill()
             bot_process = None
     except:
@@ -268,4 +262,6 @@ def clear():
 # ===============================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    print("🔥 SERVER STARTING...", flush=True)
+    print("📁 FILES:", os.listdir(), flush=True)  # 🔥 debug
     app.run(host="0.0.0.0", port=port, threaded=True)
