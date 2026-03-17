@@ -53,7 +53,7 @@ def add_console_line(text):
 
 
 # ===============================
-# BOT RUN FUNCTION
+# BOT RUN FUNCTION (FIXED)
 # ===============================
 def run_bot():
     global bot_process, bot_status, bot_start_time
@@ -69,12 +69,16 @@ def run_bot():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            preexec_fn=os.setsid
+            bufsize=1
         )
 
         add_console_line("🟢 Bot started")
 
-        for line in bot_process.stdout:
+        # 🔥 NON-BLOCKING OUTPUT READ
+        while True:
+            line = bot_process.stdout.readline()
+            if not line:
+                break
             if line.strip():
                 add_console_line(line.strip())
 
@@ -118,7 +122,7 @@ def status():
 
 @app.route("/api/start", methods=["POST"])
 def start():
-    global bot_status, bot_start_time
+    global bot_status, bot_start_time, target_uid
 
     if not check_key(request):
         return jsonify({"success": False, "msg": "Unauthorized"})
@@ -128,11 +132,9 @@ def start():
 
     data = request.json
     if data and "uid" in data:
-        global target_uid
         target_uid = data["uid"]
 
-    thread = threading.Thread(target=run_bot)
-    thread.daemon = True
+    thread = threading.Thread(target=run_bot, daemon=True)
     thread.start()
 
     bot_status = "RUNNING"
@@ -177,8 +179,7 @@ def restart():
         except:
             pass
 
-    thread = threading.Thread(target=run_bot)
-    thread.daemon = True
+    thread = threading.Thread(target=run_bot, daemon=True)
     thread.start()
 
     bot_status = "RUNNING"
@@ -242,4 +243,4 @@ def clear():
 # ===============================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
