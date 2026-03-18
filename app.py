@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import subprocess, threading, time, os, sys, json
+import subprocess, threading, time, os, sys, json, hashlib
 
 app = Flask(__name__)
 CORS(app)
@@ -17,10 +17,15 @@ users = {}
 server_start_time = time.time()
 
 # ===============================
-# FILE PATH FIX 🔥
+# PATH FIX 🔥 (AUTO DETECT)
 # ===============================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MAIN_PY_PATH = os.path.join(BASE_DIR, "main.py")  # 👈 ensure same folder
+
+# try both paths
+MAIN_PY_PATH = os.path.join(BASE_DIR, "main.py")
+
+if not os.path.exists(MAIN_PY_PATH):
+    MAIN_PY_PATH = os.path.join(BASE_DIR, "tcp_bot_ff", "main.py")
 
 # ===============================
 # USER FILE
@@ -32,12 +37,19 @@ def load_users():
     if not os.path.exists(USER_FILE):
         with open(USER_FILE, "w") as f:
             f.write("{}")
+
     with open(USER_FILE) as f:
         users = json.load(f)
 
 def save_users():
     with open(USER_FILE, "w") as f:
-        json.dump(users, f)
+        json.dump(users, f, indent=2)
+
+# ===============================
+# PASSWORD HASH 🔐
+# ===============================
+def hash_pass(p):
+    return hashlib.sha256(p.encode()).hexdigest()
 
 # ===============================
 # SECURITY
@@ -50,6 +62,7 @@ def check_key(req):
 # ===============================
 def add_log(uid, text):
     timestamp = time.strftime("%H:%M:%S")
+
     if uid not in console_logs:
         console_logs[uid] = []
 
@@ -75,7 +88,7 @@ def register():
     if username in users:
         return jsonify({"success": False, "msg": "User exists"})
 
-    users[username] = password
+    users[username] = hash_pass(password)
     save_users()
 
     return jsonify({"success": True})
@@ -89,7 +102,7 @@ def login():
     username = data.get("username")
     password = data.get("password")
 
-    if users.get(username) == password:
+    if users.get(username) == hash_pass(password):
         return jsonify({"success": True})
 
     return jsonify({"success": False})
@@ -106,27 +119,34 @@ def start():
     uid = data.get("uid")
     password = data.get("password")
 
-    # 🔥 already running check
+    if not uid or not password:
+        return jsonify({"success": False, "msg": "Missing UID/PASS"})
+
+    # already running check
     if uid in bot_processes and bot_processes[uid].poll() is None:
         return jsonify({"success": False, "msg": "Already running"})
 
     def run():
         try:
+            print("🚀 RUNNING:", MAIN_PY_PATH)
+
             cmd = [sys.executable, "-u", MAIN_PY_PATH, uid, password]
 
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True
+                text=True,
+                bufsize=1
             )
 
             bot_processes[uid] = process
             add_log(uid, "🟢 Bot started")
 
             for line in process.stdout:
-                if line.strip():
-                    add_log(uid, line.strip())
+                clean = line.strip()
+                if clean:
+                    add_log(uid, clean)
 
             process.wait()
 
@@ -134,6 +154,12 @@ def start():
             add_log(uid, f"❌ {e}")
 
         finally:
+            try:
+                if uid in bot_processes:
+                    bot_processes[uid].kill()
+            except:
+                pass
+
             bot_processes.pop(uid, None)
             add_log(uid, "🔴 Bot stopped")
 
@@ -157,9 +183,12 @@ def stop():
     if not process:
         return jsonify({"success": False})
 
-    process.terminate()
-    bot_processes.pop(uid, None)
+    try:
+        process.terminate()
+    except:
+        pass
 
+    bot_processes.pop(uid, None)
     add_log(uid, "🛑 Stopped")
 
     return jsonify({"success": True})
@@ -204,10 +233,12 @@ def console():
 # RUN
 # ===============================
 if __name__ == "__main__":
-    load_users()  # 🔥 important
+    load_users()
+
     port = int(os.environ.get("PORT", 5000))
 
     print("🔥 MULTI USER SERVER STARTED", flush=True)
-    print("📁 FILES:", os.listdir(), flush=True)  # debug
+    print("📁 FILES:", os.listdir(BASE_DIR), flush=True)
+    print("📂 USING MAIN:", MAIN_PY_PATH, flush=True)
 
     app.run(host="0.0.0.0", port=port)
