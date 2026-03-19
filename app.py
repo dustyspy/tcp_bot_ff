@@ -2,7 +2,7 @@
 # FILE: app.py - MAINUL TCP CONTROLLER BACKEND
 # AUTHOR: MAINUL - X (Md. Mainul Islam)
 # CREATED: March 19, 2026
-# VERSION: 2.1.0 (FINAL - SECURITY FIXED)
+# VERSION: 1.0.0 (FINAL - SECURITY FIXED)
 # ===========================================
 # CONTACT:
 # Telegram: @mdmainulislaminfo
