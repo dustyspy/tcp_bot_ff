@@ -28,6 +28,9 @@ if not os.path.exists(MAIN_PY_PATH):
 # FILE
 # ===============================
 ACCOUNTS_FILE = "accounts.json"
+@app.route("/api/accounts", methods=["GET"])
+def api_accounts():
+    return jsonify(load_accounts())
 
 # ===============================
 # HELPERS
