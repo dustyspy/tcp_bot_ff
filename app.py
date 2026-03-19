@@ -1,3 +1,16 @@
+# ===========================================
+# FILE: app.py - MAINUL TCP CONTROLLER BACKEND
+# AUTHOR: MAINUL - X (Md. Mainul Islam)
+# CREATED: March 19, 2026
+# VERSION: 2.1.0 (FINAL - SECURITY FIXED)
+# ===========================================
+# CONTACT:
+# Telegram: @mdmainulislaminfo
+# WhatsApp: +8801308850528
+# Email: githubmainul@gmail.com
+# GitHub: https://github.com/M41NUL
+# ===========================================
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import subprocess
@@ -7,15 +20,22 @@ import os
 import sys
 import json
 import signal
+from threading import Lock
 
 app = Flask(__name__)
 CORS(app)
 
 # ===============================
-# 🔐 ENVIRONMENT VARIABLES (Render)
+# 🔐 ENVIRONMENT VARIABLES (PRODUCTION)
 # ===============================
-API_KEY = os.environ.get("API_KEY", "MAINUL_X_SECURE")
-ADMIN_PASS = os.environ.get("ADMIN_PASS", "@MaiNul@ff_tcp_bot##")
+API_KEY = os.environ.get("API_KEY")
+if not API_KEY:
+    raise Exception("❌ CRITICAL: API_KEY environment variable not set!")
+
+ADMIN_PASS = os.environ.get("ADMIN_PASS")
+if not ADMIN_PASS:
+    raise Exception("❌ CRITICAL: ADMIN_PASS environment variable not set!")
+
 USER_PASS = os.environ.get("USER_PASS", "1234")
 
 # ===============================
@@ -25,13 +45,13 @@ bot_processes = {}
 console_logs = {}
 bot_start_times = {}
 server_start_time = time.time()
+lock = Lock()  # 🔥 NEW: Thread safety lock
 
 # ===============================
 # 📁 PATH FIX - main.py খুঁজে বের করা
 # ===============================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# সম্ভাব্য লোকেশনগুলো চেক করা
 possible_paths = [
     os.path.join(BASE_DIR, "main.py"),
     os.path.join(BASE_DIR, "tcp_bot_ff", "main.py"),
@@ -46,7 +66,7 @@ for path in possible_paths:
         break
 
 if not MAIN_PY_PATH:
-    MAIN_PY_PATH = os.path.join(BASE_DIR, "main.py")  # ডিফল্ট
+    MAIN_PY_PATH = os.path.join(BASE_DIR, "main.py")
 
 # ===============================
 # 📁 ACCOUNTS FILE MANAGEMENT
@@ -54,13 +74,11 @@ if not MAIN_PY_PATH:
 ACCOUNTS_FILE = "accounts.json"
 
 def load_accounts():
-    """accounts.json ফাইল থেকে অ্যাকাউন্ট লোড করে"""
     try:
         if os.path.exists(ACCOUNTS_FILE):
             with open(ACCOUNTS_FILE, 'r') as f:
                 return json.load(f)
         else:
-            # ফাইল না থাকলে খালি ডিকশনারি তৈরি
             with open(ACCOUNTS_FILE, 'w') as f:
                 json.dump({}, f)
             return {}
@@ -69,7 +87,6 @@ def load_accounts():
         return {}
 
 def save_accounts(data):
-    """accounts.json ফাইলে অ্যাকাউন্ট সেভ করে"""
     try:
         with open(ACCOUNTS_FILE, 'w') as f:
             json.dump(data, f, indent=2)
@@ -80,17 +97,27 @@ def save_accounts(data):
 # 🔑 API KEY CHECK
 # ===============================
 def check_key(req):
-    """রিকোয়েস্টের API_KEY চেক করে"""
     api_key = req.headers.get('x-api-key')
     if not api_key:
         api_key = req.args.get('api_key')
     return api_key == API_KEY
 
 # ===============================
+# 👑 ADMIN CHECK (FIX 1)
+# ===============================
+def check_admin(req):
+    if not check_key(req):
+        return False
+    
+    data = req.json or {}
+    admin_pass = data.get("admin_pass")
+    
+    return admin_pass == ADMIN_PASS
+
+# ===============================
 # 📝 CONSOLE LOGGING
 # ===============================
 def add_log(uid, text):
-    """কনসোলে লগ যোগ করে"""
     timestamp = time.strftime("%H:%M:%S")
     
     if uid not in console_logs:
@@ -101,25 +128,22 @@ def add_log(uid, text):
         "text": str(text)
     })
     
-    # সর্বোচ্চ ২০০ লাইন রাখা
     if len(console_logs[uid]) > 200:
         console_logs[uid] = console_logs[uid][-200:]
     
     print(f"[{uid}] [{timestamp}] {text}", flush=True)
 
 # ===============================
-# 🤖 BOT START FUNCTION
+# 🤖 BOT START FUNCTION (FIX 3 - THREAD SAFE)
 # ===============================
 def start_bot(uid, password):
-    """বট চালু করার ফাংশন"""
-    
-    if uid in bot_processes and bot_processes[uid].poll() is None:
-        add_log(uid, "⚠️ Bot already running")
-        return
+    with lock:
+        if uid in bot_processes and bot_processes[uid].poll() is None:
+            add_log(uid, "⚠️ Bot already running")
+            return
     
     def run():
         try:
-            # main.py ফাইল চেক
             if not os.path.exists(MAIN_PY_PATH):
                 add_log(uid, f"❌ main.py not found at: {MAIN_PY_PATH}")
                 return
@@ -136,11 +160,11 @@ def start_bot(uid, password):
                 universal_newlines=True
             )
             
-            bot_processes[uid] = process
-            bot_start_times[uid] = time.time()
+            with lock:
+                bot_processes[uid] = process
+                bot_start_times[uid] = time.time()
             add_log(uid, "🟢 Bot started successfully")
             
-            # আউটপুট রিড করা
             for line in process.stdout:
                 if line and line.strip():
                     add_log(uid, line.strip())
@@ -152,8 +176,9 @@ def start_bot(uid, password):
         except Exception as e:
             add_log(uid, f"❌ Error: {str(e)}")
         finally:
-            bot_processes.pop(uid, None)
-            bot_start_times.pop(uid, None)
+            with lock:
+                bot_processes.pop(uid, None)
+                bot_start_times.pop(uid, None)
             add_log(uid, "🔴 Bot stopped")
     
     threading.Thread(target=run, daemon=True).start()
@@ -162,7 +187,6 @@ def start_bot(uid, password):
 # 🔄 AUTO START ALL ACCOUNTS
 # ===============================
 def auto_start_all():
-    """সব অ্যাকাউন্ট অটো স্টার্ট করে"""
     accounts = load_accounts()
     for uid, password in accounts.items():
         start_bot(uid, password)
@@ -190,7 +214,6 @@ def api_add_account():
     accounts[uid] = password
     save_accounts(accounts)
     
-    # বট অটো স্টার্ট
     start_bot(uid, password)
     
     return jsonify({"success": True, "msg": "Account added successfully"})
@@ -220,8 +243,9 @@ def api_start():
     if not uid or not password:
         return jsonify({"success": False, "msg": "Missing UID or Password"})
     
-    if uid in bot_processes and bot_processes[uid].poll() is None:
-        return jsonify({"success": False, "msg": "Bot already running"})
+    with lock:
+        if uid in bot_processes and bot_processes[uid].poll() is None:
+            return jsonify({"success": False, "msg": "Bot already running"})
     
     start_bot(uid, password)
     return jsonify({"success": True, "msg": "Bot starting..."})
@@ -239,7 +263,8 @@ def api_stop():
     if not uid:
         return jsonify({"success": False, "msg": "Missing UID"})
     
-    process = bot_processes.get(uid)
+    with lock:
+        process = bot_processes.get(uid)
     
     if not process:
         return jsonify({"success": False, "msg": "Bot not running"})
@@ -254,14 +279,15 @@ def api_stop():
         except:
             pass
     
-    bot_processes.pop(uid, None)
-    bot_start_times.pop(uid, None)
+    with lock:
+        bot_processes.pop(uid, None)
+        bot_start_times.pop(uid, None)
     add_log(uid, "✅ Bot stopped")
     
     return jsonify({"success": True})
 
 # ===============================
-# 🔄 API: RESTART BOT (FIXED)
+# 🔄 API: RESTART BOT
 # ===============================
 @app.route("/api/restart", methods=["POST"])
 def api_restart():
@@ -279,7 +305,9 @@ def api_restart():
     if not password:
         return jsonify({"success": False, "msg": "No account found"})
     
-    process = bot_processes.get(uid)
+    with lock:
+        process = bot_processes.get(uid)
+    
     add_log(uid, "🔄 Restarting bot...")
     
     if process:
@@ -292,8 +320,9 @@ def api_restart():
             except:
                 pass
         
-        bot_processes.pop(uid, None)
-        bot_start_times.pop(uid, None)
+        with lock:
+            bot_processes.pop(uid, None)
+            bot_start_times.pop(uid, None)
     
     start_bot(uid, password)
     
@@ -312,7 +341,8 @@ def api_forcekill():
     if not uid:
         return jsonify({"success": False, "msg": "Missing UID"})
     
-    process = bot_processes.get(uid)
+    with lock:
+        process = bot_processes.get(uid)
     
     if not process:
         return jsonify({"success": False, "msg": "Bot not running"})
@@ -323,8 +353,9 @@ def api_forcekill():
     except:
         pass
     
-    bot_processes.pop(uid, None)
-    bot_start_times.pop(uid, None)
+    with lock:
+        bot_processes.pop(uid, None)
+        bot_start_times.pop(uid, None)
     add_log(uid, "✅ Bot killed")
     
     return jsonify({"success": True})
@@ -363,7 +394,7 @@ def api_status():
 # ===============================
 @app.route("/api/user_status", methods=["POST"])
 def api_user_status():
-    if not check_key(request):   # 🔥 ADD THIS
+    if not check_key(request):
         return jsonify({"success": False, "msg": "Invalid API key"})
 
     uid = request.json.get("uid")
@@ -378,7 +409,7 @@ def api_user_status():
 # ===============================
 @app.route("/api/console", methods=["POST"])
 def api_console():
-    if not check_key(request):   # 🔥 ADD THIS
+    if not check_key(request):
         return jsonify({"success": False, "msg": "Invalid API key"})
 
     uid = request.json.get("uid")
@@ -396,7 +427,6 @@ def api_login():
     username = data.get("username")
     password = data.get("password")
     
-    # ইউজার চেক
     if username == "mainul" and password == USER_PASS:
         return jsonify({
             "success": True,
@@ -427,6 +457,85 @@ def api_admin_login():
         "success": False,
         "msg": "Wrong admin password"
     })
+
+# ===============================
+# 👑 ADMIN API: ALL USERS (FIX 1 APPLIED)
+# ===============================
+@app.route("/api/admin/users", methods=["GET"])
+def api_admin_users():
+    if not check_admin(request):
+        return jsonify({"success": False, "msg": "Admin authentication failed"})
+    
+    accounts = load_accounts()
+    return jsonify(accounts)
+
+# ===============================
+# 👑 ADMIN API: DELETE USER (FIX 1 APPLIED)
+# ===============================
+@app.route("/api/admin/delete_user", methods=["POST"])
+def api_admin_delete_user():
+    if not check_admin(request):
+        return jsonify({"success": False, "msg": "Admin authentication failed"})
+    
+    data = request.json
+    uid = data.get("uid")
+    
+    accounts = load_accounts()
+    
+    if uid in accounts:
+        del accounts[uid]
+        save_accounts(accounts)
+        
+        with lock:
+            if uid in bot_processes:
+                try:
+                    bot_processes[uid].kill()
+                except:
+                    pass
+                bot_processes.pop(uid, None)
+                bot_start_times.pop(uid, None)
+        
+        add_log("ADMIN", f"🗑️ Deleted user: {uid}")
+        return jsonify({"success": True, "msg": "User deleted"})
+    
+    return jsonify({"success": False, "msg": "User not found"})
+
+# ===============================
+# 👑 ADMIN API: STOP ALL BOTS (FIX 1 APPLIED)
+# ===============================
+@app.route("/api/admin/stop_all", methods=["POST"])
+def api_admin_stop_all():
+    if not check_admin(request):
+        return jsonify({"success": False, "msg": "Admin authentication failed"})
+    
+    count = 0
+    with lock:
+        for uid, process in list(bot_processes.items()):
+            try:
+                process.terminate()
+                count += 1
+                add_log(uid, "🛑 Stopped by admin")
+            except:
+                pass
+        
+        bot_processes.clear()
+        bot_start_times.clear()
+    
+    add_log("ADMIN", f"🛑 Stopped {count} bots")
+    return jsonify({"success": True, "msg": f"Stopped {count} bots"})
+
+# ===============================
+# 👑 ADMIN API: CLEAR ALL CONSOLES (FIX 1 APPLIED)
+# ===============================
+@app.route("/api/admin/clear_all", methods=["POST"])
+def api_admin_clear_all():
+    if not check_admin(request):
+        return jsonify({"success": False, "msg": "Admin authentication failed"})
+    
+    console_logs.clear()
+    add_log("ADMIN", "🧹 Cleared all consoles")
+    
+    return jsonify({"success": True, "msg": "All consoles cleared"})
 
 # ===============================
 # 🏠 HOME PAGE
@@ -563,7 +672,6 @@ def home():
             background: linear-gradient(90deg, transparent, #00ff00, transparent);
         }}
     </style>
-    <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
@@ -576,51 +684,35 @@ def home():
             <div style="margin-top: 15px;">📊 RUNNING BOTS: <span class="value">{bots}</span></div>
         </div>
 
-        
         <div class="contact-section">
             <div class="contact-title">
                 <i class="fas fa-address-card"></i> CONTACT DEVELOPER
             </div>
             
             <div class="contact-grid">
-                <!-- টেলিগ্রাম -->
                 <div class="contact-item">
-                    <div class="contact-icon">
-                        <i class="fab fa-telegram"></i>
-                    </div>
+                    <div class="contact-icon"><i class="fab fa-telegram"></i></div>
                     <div class="contact-label">Telegram</div>
                     <div class="contact-value">
                         <a href="https://t.me/mdmainulislaminfo" target="_blank">@mdmainulislaminfo</a>
                     </div>
                 </div>
-
-                <!-- হোয়াটসঅ্যাপ -->
                 <div class="contact-item">
-                    <div class="contact-icon">
-                        <i class="fab fa-whatsapp"></i>
-                    </div>
+                    <div class="contact-icon"><i class="fab fa-whatsapp"></i></div>
                     <div class="contact-label">WhatsApp</div>
                     <div class="contact-value">
                         <a href="https://wa.me/8801308850528" target="_blank">+8801308850528</a>
                     </div>
                 </div>
-
-                <!-- ইমেইল -->
                 <div class="contact-item">
-                    <div class="contact-icon">
-                        <i class="fas fa-envelope"></i>
-                    </div>
+                    <div class="contact-icon"><i class="fas fa-envelope"></i></div>
                     <div class="contact-label">Email</div>
                     <div class="contact-value">
                         <a href="mailto:githubmainul@gmail.com">githubmainul@gmail.com</a>
                     </div>
                 </div>
-
-                <!-- গিটহাব -->
                 <div class="contact-item">
-                    <div class="contact-icon">
-                        <i class="fab fa-github"></i>
-                    </div>
+                    <div class="contact-icon"><i class="fab fa-github"></i></div>
                     <div class="contact-label">GitHub</div>
                     <div class="contact-value">
                         <a href="https://github.com/M41NUL" target="_blank">M41NUL</a>
@@ -628,7 +720,6 @@ def home():
                 </div>
             </div>
 
-            <!-- কুইক কন্টাক্ট বাটন -->
             <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
                 <a href="https://t.me/mdmainulislaminfo" target="_blank" style="text-decoration: none;">
                     <span class="badge" style="background: #0088cc; color: white;">
@@ -656,7 +747,7 @@ def home():
         <div>
             <span class="badge">🔥 MAINUL - X</span>
             <span class="badge">⚡ TCP CONTROLLER</span>
-            <span class="badge">💀 v1.0.0</span>
+            <span class="badge">💀 v2.1.0</span>
         </div>
 
         <hr class="separator">
@@ -677,21 +768,20 @@ def home():
 # 🚀 RUN SERVER
 # ===============================
 if __name__ == "__main__":
-    print("=" * 50)
+    print("=" * 60)
     print("🔥 MAINUL TCP SERVER STARTING...")
-    print(f"📂 Main bot path: {MAIN_PY_PATH}")
-    print(f"🔑 API Key: {API_KEY[:5]}...{API_KEY[-5:] if len(API_KEY) > 10 else ''}")
+    print("👤 Developer: MAINUL - X (Md. Mainul Islam)")
+    print("📱 Contact: @mdmainulislaminfo")
+    print("=" * 60)
     print(f"🤖 Auto-starting accounts...")
-    print("=" * 50)
-    
+    print("=" * 60)
     
     auto_start_all()
     
-   
     port = int(os.environ.get("PORT", 5000))
     
     print(f"✅ Server running on port {port}")
     print(f"🌐 http://localhost:{port}")
-    print("=" * 50)
+    print("=" * 60)
     
     app.run(host="0.0.0.0", port=port, debug=False)
