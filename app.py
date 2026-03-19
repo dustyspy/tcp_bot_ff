@@ -12,6 +12,7 @@ API_KEY = "MAINUL_X_SECURE"
 # ===============================
 bot_processes = {}
 console_logs = {}
+bot_start_times = {}
 server_start_time = time.time()
 
 # ===============================
@@ -56,8 +57,8 @@ def add_log(uid, text):
         "text": str(text)
     })
 
-    if len(console_logs[uid]) > 100:
-        console_logs[uid] = console_logs[uid][-100:]
+    if len(console_logs[uid]) > 200:
+        console_logs[uid] = console_logs[uid][-200:]
 
     print(f"[{uid}] [{timestamp}] {text}", flush=True)
 
@@ -83,6 +84,8 @@ def start_bot(uid, password):
             )
 
             bot_processes[uid] = process
+            bot_start_times[uid] = time.time()
+
             add_log(uid, "🟢 Bot started")
 
             for line in process.stdout:
@@ -96,6 +99,7 @@ def start_bot(uid, password):
 
         finally:
             bot_processes.pop(uid, None)
+            bot_start_times.pop(uid, None)
             add_log(uid, "🔴 Bot stopped")
 
     threading.Thread(target=run, daemon=True).start()
@@ -109,7 +113,7 @@ def auto_start_all():
         start_bot(uid, password)
 
 # ===============================
-# ADD ACCOUNT (FIXED 😈)
+# ADD ACCOUNT
 # ===============================
 @app.route("/api/add_account", methods=["POST"])
 def api_add_account():
@@ -125,12 +129,8 @@ def api_add_account():
 
     accounts = load_accounts()
 
-    # 🚫 BLOCK DUPLICATE
     if uid in accounts:
-        return jsonify({
-            "success": False,
-            "msg": "UID already added"
-        })
+        return jsonify({"success": False, "msg": "UID already added"})
 
     accounts[uid] = password
     save_accounts(accounts)
@@ -151,6 +151,9 @@ def api_start():
     uid = data.get("uid")
     password = data.get("password")
 
+    if uid in bot_processes and bot_processes[uid].poll() is None:
+        return jsonify({"success": False, "message": "Already running"})
+
     start_bot(uid, password)
 
     return jsonify({"success": True})
@@ -167,20 +170,26 @@ def api_stop():
     process = bot_processes.get(uid)
 
     if not process:
-        return jsonify({"success": False})
+        return jsonify({"success": False, "message": "Bot not running"})
 
     try:
         process.terminate()
+        process.wait(timeout=3)
     except:
-        pass
+        try:
+            process.kill()
+        except:
+            pass
 
     bot_processes.pop(uid, None)
-    add_log(uid, "🛑 Stopped")
+    bot_start_times.pop(uid, None)
+
+    add_log(uid, "🛑 Bot stopped")
 
     return jsonify({"success": True})
 
 # ===============================
-# RESTART
+# RESTART (FIXED 🔥)
 # ===============================
 @app.route("/api/restart", methods=["POST"])
 def api_restart():
@@ -193,14 +202,24 @@ def api_restart():
     password = accounts.get(uid)
 
     if not password:
-        return jsonify({"success": False})
+        return jsonify({"success": False, "message": "No account found"})
 
     process = bot_processes.get(uid)
+
+    add_log(uid, "🔄 Restarting bot...")  # 🔥 added
+
     if process:
         try:
             process.terminate()
+            process.wait(timeout=3)
         except:
-            pass
+            try:
+                process.kill()
+            except:
+                pass
+
+    bot_processes.pop(uid, None)
+    bot_start_times.pop(uid, None)
 
     start_bot(uid, password)
 
@@ -226,7 +245,23 @@ def api_forcekill():
         pass
 
     bot_processes.pop(uid, None)
+    bot_start_times.pop(uid, None)
+
     add_log(uid, "💀 Force killed")
+
+    return jsonify({"success": True})
+
+# ===============================
+# CLEAR CONSOLE (NEW 🔥)
+# ===============================
+@app.route("/api/clear_console", methods=["POST"])
+def api_clear_console():
+    if not check_key(request):
+        return jsonify({"success": False})
+
+    uid = request.json.get("uid")
+
+    console_logs[uid] = []
 
     return jsonify({"success": True})
 
@@ -250,7 +285,8 @@ def api_user_status():
     uid = request.json.get("uid")
 
     return jsonify({
-        "running": uid in bot_processes
+        "running": uid in bot_processes,
+        "start_time": bot_start_times.get(uid)
     })
 
 # ===============================
@@ -265,43 +301,44 @@ def api_console():
     })
 
 # ===============================
-# ACCOUNTS
-# ===============================
-@app.route("/api/accounts", methods=["GET"])
-def api_accounts():
-    return jsonify(load_accounts())
-
-# ===============================
-# DELETE
-# ===============================
-@app.route("/api/delete", methods=["POST"])
-def api_delete():
-    if not check_key(request):
-        return jsonify({"success": False})
-
-    uid = request.json.get("uid")
-
-    accounts = load_accounts()
-    accounts.pop(uid, None)
-    save_accounts(accounts)
-
-    process = bot_processes.get(uid)
-    if process:
-        try:
-            process.terminate()
-        except:
-            pass
-
-    bot_processes.pop(uid, None)
-
-    return jsonify({"success": True})
-
-# ===============================
 # ROOT
 # ===============================
 @app.route("/")
 def home():
-    return "MAINUL TCP SERVER RUNNING 😈"
+    uptime = int(time.time() - server_start_time)
+    bots = len(bot_processes)
+
+    return f"""
+    <html>
+    <head>
+        <title>MAINUL TCP SERVER</title>
+        <style>
+            body {{
+                background: #0a0a0a;
+                color: #00ff00;
+                font-family: monospace;
+                text-align: center;
+                padding-top: 100px;
+            }}
+            .box {{
+                border: 1px solid #00ff00;
+                padding: 20px;
+                display: inline-block;
+                border-radius: 10px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="box">
+            <h1>🚀 MAINUL TCP SERVER</h1>
+            <p>STATUS: ONLINE</p>
+            <p>⏱ UPTIME: {uptime} sec</p>
+            <p>🤖 RUNNING BOTS: {bots}</p>
+            <p>🔥 POWERED BY MAINUL - X</p>
+        </div>
+    </body>
+    </html>
+    """
 
 # ===============================
 # RUN
